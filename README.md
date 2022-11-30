@@ -17,6 +17,7 @@ Note: application currently requires a PostgreSQL database running locally.
 4. Run `npm install` to install dependencies in React web folder.
 5. Run `npm start` to start the React server.
 
+Sign in using one of the demo employees in the development db, `SELECT * from employees`
 
 ## Functional Requirements (High Level)
 
