@@ -8,14 +8,14 @@ Employees can send and receive points, feedback based on their performance, enga
 
 
 ## Setup
-1. Create seperate folders for React - web and Ruby on Rails - server environments.
-2. Run `npx create-react-app my-app` to install the boiler plate code and dependencies in React - web folder.
-3. Run `rails new api_app_name --api` to install the dependencies in Ruby on Rials - server folder. 
-4. Run `bin/rake db:reset` to create, load and seed db in rails server.
-5. Run `bundle install` to install dependencies in rails server folder.
-6. Run `bin/rails s -b 0.0.0.0` to start the rails server.
-7. Run `npm install` to install dependencies in React web folder.
-8. Run `npm start` to start the React server.
+
+Note: application currently requires a PostgreSQL database running locally.
+
+1. Run `bundle install` to install dependencies in rails server folder.
+2. Run `bin/rake db:reset` to create, load and seed db in rails server.
+3. Run `bin/rails s` to start the rails server.
+4. Run `npm install` to install dependencies in React web folder.
+5. Run `npm start` to start the React server.
 
 
 ## Functional Requirements (High Level)
