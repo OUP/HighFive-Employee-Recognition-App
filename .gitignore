@@ -2,3 +2,6 @@
 /.bundle
 /log/*
 !/log/.keep
+
+/config/ssh_config
+!/config/ssh_config.example
