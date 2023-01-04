@@ -22,11 +22,11 @@ GEM
       net-ssh (>= 2.8.0)
 
 PLATFORMS
-  x86_64-darwin-19
+  ruby
 
 DEPENDENCIES
   capistrano
   capistrano-bundler
 
 BUNDLED WITH
-   2.3.24
+   1.17.3
