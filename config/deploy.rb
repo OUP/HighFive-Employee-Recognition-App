@@ -43,3 +43,11 @@ append :linked_files, "server/.env"
 set :rails_env, "production"
 
 set :bundle_gemfile, -> { release_path.join('server/Gemfile') }
+
+namespace :deploy do
+  after :publishing, :restart_app do
+    on roles(:app), in: :sequence, wait: 5 do
+      execute "sudo service puma restart"
+    end
+  end
+end
