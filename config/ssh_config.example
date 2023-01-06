@@ -1,0 +1,5 @@
+Host highfive_development
+HostName highfive.example.com
+User deploy
+IdentitiesOnly yes
+IdentityFile /path/to/your/keyfile.pem

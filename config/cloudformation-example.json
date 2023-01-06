@@ -1,0 +1,487 @@
+{
+  "AWSTemplateFormatVersion" : "2010-09-09",
+
+  "Description" : "Example stand-alone server ready for deployment with Capistrano",
+
+  "Parameters" : {
+    "securityGroups" : {
+      "Description" : "Security groups for network interface",
+      "Type" : "List<AWS::EC2::SecurityGroup::Id>"
+    },
+    "subnetId" : {
+      "Description" : "Public subnet id for instance",
+      "Type" : "AWS::EC2::Subnet::Id"
+    },
+    "route53ZoneId" : {
+      "Type" : "AWS::Route53::HostedZone::Id",
+      "Description" : "Hosted Zone to create DNS record"
+    },
+    "serverHostname" : {
+      "Type" : "String",
+      "Description" : "Fully qualified server hostname"
+    },
+    "instanceType" : {
+      "Type" : "String",
+      "Description" : "Instance type",
+      "Default" : "t3.micro",
+      "AllowedValues" : ["t3.micro","t3.small","t3.medium","m3.medium"],
+      "ConstraintDescription" : "must be a listed EC2 instance type."
+    },
+    "keyName" : {
+      "Description" : "EC2 Keypair to use on instance",
+      "Type" : "AWS::EC2::KeyPair::KeyName"
+    },
+    "railsSecretKey" : {
+      "Type" : "String",
+      "Description" : "Secret key for Rails, generate using `rake secret`",
+      "AllowedPattern" : "^[a-z0-9]{128}$",
+      "NoEcho" : "true"
+    }
+  },
+
+  "Mappings" : {
+    "RegionMap" : {
+      "eu-west-1": { "ImageId": "ami-08c149f9b2ace933d" }
+    }
+  },
+
+  "Resources" : {
+    "instanceRole": {
+       "Type": "AWS::IAM::Role",
+       "Properties": {
+          "AssumeRolePolicyDocument": {
+             "Statement": [{
+                "Effect": "Allow",
+                "Principal": {
+                   "Service": ["ec2.amazonaws.com"]
+                },
+                "Action": ["sts:AssumeRole"]
+             }]
+          },
+          "Path": "/"
+       }
+    },
+    "instanceProfile": {
+       "Type": "AWS::IAM::InstanceProfile",
+       "Properties": {
+          "Path": "/",
+          "Roles": [{ "Ref": "instanceRole" }]
+       }
+    },
+    "instancePolicy": {
+       "Type": "AWS::IAM::Policy",
+       "Properties": {
+          "PolicyName": "instance",
+          "PolicyDocument": {
+            "Statement": [
+              {
+                "Effect": "Allow",
+                "Action": [ "route53:ListHostedZones", "route53:GetChange" ],
+                "Resource": "*"
+              },
+              {
+                "Effect" : "Allow",
+                "Action" : "route53:ChangeResourceRecordSets",
+                "Resource" : [ {"Fn::Join" : [ "", [ "arn:aws:route53:::hostedzone/", { "Ref" : "route53ZoneId" } ] ] } ]
+              }
+            ]
+          },
+          "Roles": [{ "Ref": "instanceRole" }]
+       }
+    },
+    "instanceIP": {
+      "Type": "AWS::EC2::EIP"
+    },
+    "instanceIPAssociation" : {
+      "Type" : "AWS::EC2::EIPAssociation",
+      "Properties" : {
+        "AllocationId" : { "Fn::GetAtt" : [ "instanceIP", "AllocationId" ] },
+        "NetworkInterfaceId" : { "Fn::GetAtt" : [ "networkInterface", "Id" ] }
+      }
+    },
+    "networkInterface" : {
+      "Type" : "AWS::EC2::NetworkInterface",
+      "Properties" : {
+        "GroupSet": { "Ref" : "securityGroups" },
+        "SubnetId" : { "Ref" : "subnetId" }
+      }
+    },
+    "route53Record" : {
+       "Type" : "AWS::Route53::RecordSet",
+       "Properties" : {
+          "HostedZoneId" : { "Ref" : "route53ZoneId" },
+          "Name" : { "Ref" : "serverHostname" },
+          "ResourceRecords" : [ { "Fn::GetAtt" : [ "stackInstance", "PublicIp" ] } ],
+          "TTL" : "300",
+          "Type" : "A"
+       }
+    },
+    "systemFailureAlarm": {
+      "Type": "AWS::CloudWatch::Alarm",
+      "Properties": {
+        "AlarmDescription": "Trigger recovery when system status check fails repeatedly.",
+        "Namespace": "AWS/EC2" ,
+        "MetricName": "StatusCheckFailed_System",
+        "Statistic": "Minimum",
+        "Period": "60",
+        "EvaluationPeriods": "10",
+        "ComparisonOperator": "GreaterThanThreshold",
+        "Threshold": "0",
+        "AlarmActions": [ {"Fn::Join" : ["", ["arn:aws:automate:", { "Ref" : "AWS::Region" }, ":ec2:recover" ]]} ],
+        "Dimensions": [{"Name": "InstanceId","Value": {"Ref": "stackInstance"}}]
+      }
+    },
+    "instanceFailureAlarm": {
+      "Type": "AWS::CloudWatch::Alarm",
+      "Properties": {
+        "AlarmDescription": "Trigger reboot when instance status check fails repeatedly.",
+        "Namespace": "AWS/EC2" ,
+        "MetricName": "StatusCheckFailed_Instance",
+        "Statistic": "Minimum",
+        "Period": "60",
+        "EvaluationPeriods": "5",
+        "ComparisonOperator": "GreaterThanThreshold",
+        "Threshold": "0",
+        "AlarmActions": [ {"Fn::Join" : ["", ["arn:aws:automate:", { "Ref" : "AWS::Region" }, ":ec2:reboot" ]]} ],
+        "Dimensions": [{"Name": "InstanceId","Value": {"Ref": "stackInstance"}}]
+      }
+    },
+    "stackInstance" : {
+      "Type" : "AWS::EC2::Instance",
+      "DependsOn" : "instanceIPAssociation",
+      "Metadata" : {
+        "AWS::CloudFormation::Init" : {
+          "configSets" : {
+            "default" : [ "extras", "base", "website", "database" ]
+          },
+          "database" : {
+            "packages" : {
+              "yum" : {
+                "postgresql-server" : []
+              }
+            },
+            "commands" : {
+              "01-create-postgresql-cluster" : {
+                "command" : "/usr/bin/postgresql-setup initdb",
+                "test" : "! /usr/bin/postgresql-check-db-dir /var/lib/pgsql/data"
+              },
+              "02-create-postgresql-database" : {
+                "command" : "sudo -u postgres createdb website",
+                "test" : "test -z $(sudo -u postgres psql -Atc \"SELECT datname FROM pg_database WHERE datname = 'website'\")"
+              },
+              "03-create-postgresql-user" : {
+                "command" : "sudo -u postgres createuser deploy",
+                "test" : "test -z $(sudo -u postgres psql -Atc \"SELECT rolname FROM pg_roles WHERE rolname = 'deploy'\")"
+              },
+              "04-grant-postgresql-privileges" : {
+                "command" : "sudo -u postgres psql -c 'grant all privileges on database website to deploy;'"
+              }
+            },
+            "services" : {
+              "sysvinit" : {
+                "postgresql" : { "enabled" : "true", "ensureRunning" : "true" }
+              }
+            }
+          },
+          "website" : {
+            "packages" : {
+              "yum" : {
+                "git" : [],
+                "gcc" : [],
+                "make" : [],
+                "nginx": [],
+                "ruby" : [],
+                "ruby-devel" : [],
+                "rubygems" : [],
+                "rubygem-irb" : [],
+                "rubygem-json" : [],
+                "rubygem-bundler" : [],
+                "rubygem-io-console" : [],
+                "postgresql-libs" : [],
+                "postgresql-devel" : [],
+                "zlib-devel" : []
+              }
+            },
+            "commands" : {
+              "01-create-deploy-user" : {
+                "command" : "adduser deploy",
+                "test" : "! id -u deploy"
+              },
+              "02-lock-deploy-passwd" : {
+                "command" : "passwd -l deploy"
+              },
+              "03-create-ssh-dir" : {
+                "command" : "mkdir -p /home/deploy/.ssh; chmod 700 /home/deploy/.ssh; chown deploy: /home/deploy/.ssh"
+              },
+              "04-copy-authorized-keys" : {
+                "command" : "cp /home/ec2-user/.ssh/authorized_keys ./; chown deploy: authorized_keys; chmod 600 authorized_keys",
+                "cwd" : "/home/deploy/.ssh"
+              },
+              "05-create-website-dir" : {
+                "command" : "mkdir -p /opt/website/"
+              },
+              "06-create-shared-dir" : {
+                "command" : "mkdir -p /opt/website/shared"
+              },
+              "07-change-website-owner" : {
+                "command" : "chown -R -h deploy: /opt/website/"
+              },
+              "08-enable-puma-service" : {
+                "command" : "systemctl enable puma.service"
+              },
+              "09-delete-cfn-init-backup-files" : {
+                "command" : "find /etc/{cron,sudoers}* -name *.bak -exec rm -f {} \\;"
+              },
+              "10-reload-systemd-units" : {
+                "command" : "systemctl daemon-reload"
+              },
+              "11-schedule-ssl-cert-installation": {
+                "command": "echo \"/root/install_ssl_certificate.sh\" | at now + 1 minute"
+              }
+            },
+            "files" : {
+              "/etc/sudoers.d/deploy-user" : {
+                "content" : {"Fn::Join" : [ "", [
+                  "# Allow deploy user to stop/start/restart puma service\n",
+                  "# Puma is not started automatically when server is provisioned,\n",
+                  "# because it will fail to start successfully until first deploy\n",
+                  "deploy ALL=(root) NOPASSWD:/sbin/service puma stop\n",
+                  "deploy ALL=(root) NOPASSWD:/sbin/service puma start\n",
+                  "deploy ALL=(root) NOPASSWD:/sbin/service puma restart\n"
+                ] ]},
+                "mode" : "0640",
+                "owner" : "root",
+                "group" : "root"
+              },
+              "/root/install_ssl_certificate.sh": {
+                "content" : {"Fn::Join" : [ "", [
+                  "#!/bin/bash\n",
+                  "if ! test -t 1 && ! test -t 2; then\n",
+                  "  exec 1> >(tee >>/var/log/ssl_certificate_installation.log) 2>&1\n",
+                  "  date\n",
+                  "fi\n",
+                  "certbot --agree-tos --dns-route53 --installer nginx --domain $(hostname) --non-interactive --email root@$(hostname)"
+                ] ]},
+                "mode" : "0700",
+                "owner" : "root",
+                "group" : "root"
+              },
+              "/etc/cron.daily/certbot-renew" : {
+                "content" : {"Fn::Join" : [ "", [
+                  "#!/bin/bash\n",
+                  "/usr/bin/certbot renew --nginx --quiet\n"
+                ] ]},
+                "mode" : "0755",
+                "owner" : "root",
+                "group" : "root"
+              },
+              "/opt/website/shared/server/.env" : {
+                "content" : { "Fn::Join" : ["", [
+                  "RAILS_SECRET_KEY=", { "Ref" : "railsSecretKey" }, "\n",
+                  "DATABASE_URL=postgres://deploy@localhost/website\n",
+                  ""
+                ]]}
+              },
+              "/etc/systemd/system/puma.service" : {
+                "content" : { "Fn::Join" : ["", [
+                  "[Unit]\n",
+                  "Description=Puma HTTP Server\n",
+                  "After=network.target\n",
+                  "\n",
+                  "[Service]\n",
+                  "# Foreground process (do not use --daemon in ExecStart or puma.rb)\n",
+                  "Type=simple\n",
+                  "\n",
+                  "# Create puma runtime directory for predictable path to puma socket\n",
+                  "# Note: nginx uses PrivateTmp, so cannot use /tmp for puma socket\n",
+                  "RuntimeDirectory=puma\n",
+                  "\n",
+                  "# Preferably configure a non-privileged user\n",
+                  "User=deploy\n",
+                  "\n",
+                  "# The path to the your application code root directory.\n",
+                  "WorkingDirectory=/opt/website/current/server\n",
+                  "\n",
+                  "# Always set the rails environment to production\n",
+                  "Environment=RAILS_ENV=production\n",
+                  "\n",
+                  "# Command to start service, relies on hard-coded absolute path to bundle\n",
+                  "ExecStart=/bin/bundle exec puma -C /opt/website/current/server/config/puma.rb config.ru\n",
+                  "\n",
+                  "Restart=on-failure\n",
+                  "\n",
+                  "# These moved to the Unit section in systemd v230, but we currently have v219,\n",
+                  "# and v230 maintains compatibilty with these settings here, so leave them here.\n",
+                  "StartLimitInterval=300\n",
+                  "StartLimitBurst=5\n",
+                  "\n",
+                  "[Install]\n",
+                  "WantedBy=multi-user.target\n",
+                  "\n"
+                ]]},
+                 "mode" : "0755",
+                 "owner" : "root",
+                 "group" : "root"
+              },
+              "/etc/nginx/conf.d/website.conf" : {
+                "content" : { "Fn::Join" : ["", [
+                  "upstream puma {\n",
+                  "    server localhost:3000;\n",
+                  "}\n",
+                  "server {\n",
+                  "  listen 80;\n",
+                  "  server_name ", { "Ref" : "serverHostname" }, ";\n",
+                  "  root /opt/website/current/web/build;\n",
+                  "  try_files $uri/index.html $uri @puma;\n",
+                  "  location @puma {\n",
+                  "    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;\n",
+                  "    proxy_set_header X-Forwarded-Proto $scheme;\n",
+                  "    proxy_set_header Host $http_host;\n",
+                  "    proxy_redirect off;\n",
+                  "    proxy_pass http://puma;\n",
+                  "  }\n",
+                  "}\n"
+                ]]},
+                "mode" : "0755",
+                "owner" : "root",
+                "group" : "root"
+              },
+            },
+            "services" : {
+              "sysvinit" : {
+                "nginx" : { "enabled" : "true", "ensureRunning" : "true", "files" : ["/etc/nginx/nginx.conf", "/etc/nginx/conf.d/website.conf"] }
+              }
+            }
+          },
+          "extras" : {
+            "commands" : {
+              "01-enable-amazon-linux-extras" : {
+                "command" : "amazon-linux-extras enable nginx1 ruby2.6 epel"
+              },
+              "02-yum-install-epel-release" : {
+                "command" : "yum install -y epel-release",
+                "test" : "! test -f /etc/yum.repos.d/epel.repo"
+              },
+              "04-add-nodesource-yum-repo" : {
+                "command" : "curl --silent --location https://rpm.nodesource.com/setup_12.x | bash -",
+                "test" : "! ls /etc/yum.repos.d/*nodesource*"
+              },
+              "05-install-third-party-extras" : {
+                "command" : "yum install -y -t nodejs python2-certbot-dns-route53 python2-certbot-nginx",
+                "test" : "! rpm -q nodejs python2-certbot-dns-route53 python2-certbot-nginx > /dev/null"
+              },
+              "06-disable-third-party-repos" : {
+                "command" : "yum-config-manager --disable epel nodesource"
+              }
+            }
+          },
+          "base" : {
+            "packages" : {
+              "yum" : {
+                "mailx" : []
+              }
+            },
+            "commands" : {
+              "01-set-hostname-command" : {
+                "command" : {"Fn::Join" : [ "", [
+                  "hostnamectl set-hostname ", { "Ref" : "serverHostname" }
+                ] ]}
+              },
+              "02-set-hostname-hostsfile" : {
+                "command" : "if ! fgrep $(hostname) /etc/hosts > /dev/null; then echo \"127.0.0.1  $(hostname)\" >> /etc/hosts; fi"
+              },
+              "03-configure-anacron-start-hours" : {
+                "command" : "sed -i s/^START_HOURS_RANGE=.*/START_HOURS_RANGE=0-6/ /etc/anacrontab"
+              },
+              "04-configure-anacron-random-delay" : {
+                "command" : "sed -i s/^RANDOM_DELAY=.*/RANDOM_DELAY=90/ /etc/anacrontab"
+              },
+              "05-force-anacron-start-hours-range" : {
+                "command": "if ! test -s /var/spool/anacron/cron.daily; then /usr/sbin/anacron -u; fi",
+                "test" : "test -f /usr/sbin/anacron"
+              },
+              "06-delete-cfn-init-backup-files" : {
+                "command" : "find /etc/cron* -name *.bak -exec rm -f {} \\;"
+              }
+            },
+            "files" : {
+              "/etc/cron.daily/0yum-update" : {
+                "content" : {"Fn::Join" : [ "", [
+                  "#!/bin/bash\n",
+                  "set -o pipefail\n",
+                  "yum update --security --sec-severity=critical,important -y -q -t -e 0 --rpmverbosity=critical 2>&1 | tee >(logger -t yum-update) > /tmp/yum.err\n",
+                  "if test $PIPESTATUS -ne 0; then cat /tmp/yum.err; fi\n"
+                ] ]},
+                "mode" : "0755",
+                "owner" : "root",
+                "group" : "root"
+              },
+              "/etc/cron.daily/restart-if-needed" : {
+                "content" : {"Fn::Join" : [ "", [
+                  "#!/bin/bash\n",
+                  "needs-restarting -r > /dev/null || /sbin/shutdown -r now\n"
+                ] ]},
+                "mode" : "0755",
+                "owner" : "root",
+                "group" : "root"
+              },
+              "/etc/cfn/cfn-hup.conf" : {
+                "content" : { "Fn::Join" : ["", [
+                  "[main]\n",
+                  "stack=", { "Ref" : "AWS::StackId" }, "\n",
+                  "interval=1\n",
+                  "region=", { "Ref" : "AWS::Region" }, "\n",
+                  "verbose=false\n"
+                ]]},
+                "mode"    : "000400",
+                "owner"   : "root",
+                "group"   : "root"
+              },
+              "/etc/cfn/hooks.d/cfn-auto-reloader.conf" : {
+                "content": { "Fn::Join" : ["", [
+                  "[cfn-auto-reloader-hook]\n",
+                  "triggers=post.update\n",
+                  "path=Resources.stackInstance.Metadata.AWS::CloudFormation::Init\n\n",
+                  "action=/opt/aws/bin/cfn-init -s ", { "Ref" : "AWS::StackName" }, " -r stackInstance --region ", { "Ref" : "AWS::Region" }, "\n",
+                  "runas=root\n"
+                ]]}
+              }
+            },
+            "services" : {
+              "sysvinit" : {
+                "cfn-hup" : { "enabled" : "true", "ensureRunning" : "true", "files" : ["/etc/cfn/cfn-hup.conf", "/etc/cfn/hooks.d/cfn-auto-reloader.conf"] }
+              }
+            }
+          }
+        }
+      },
+      "Properties" : {
+        "ImageId" : { "Fn::FindInMap" : [ "RegionMap", { "Ref" : "AWS::Region" }, "ImageId" ] },
+        "InstanceType"   : { "Ref" : "instanceType" },
+        "IamInstanceProfile" : { "Ref" : "instanceProfile" },
+        "NetworkInterfaces" : [{ "NetworkInterfaceId" : { "Ref" : "networkInterface" }, "DeviceIndex" : "0" }],
+        "KeyName" : { "Ref" : "keyName" },
+        "UserData" : { "Fn::Base64" : { "Fn::Join" : ["", [
+          "#!/bin/bash -v\n",
+          "yum update -y aws-cfn-bootstrap\n",
+
+          "# Install instance packages, files etc.\n",
+          "/opt/aws/bin/cfn-init --stack ", { "Ref" : "AWS::StackName" },
+          "   --resource stackInstance --region ", { "Ref" : "AWS::Region" }, "\n",
+
+          "# Signal the status from cfn-init\n",
+          "/opt/aws/bin/cfn-signal -e $? --stack ", { "Ref" : "AWS::StackName" },
+          "   --resource stackInstance --region ", { "Ref" : "AWS::Region" }, "\n"
+        ]]}},
+        "Tags" : [
+          { "Key" : "Name", "Value" : { "Ref" : "AWS::StackName" } }
+        ]
+      },
+      "CreationPolicy" : {
+        "ResourceSignal" : {
+          "Timeout" : "PT5M"
+        }
+      }
+    }
+  }
+}
