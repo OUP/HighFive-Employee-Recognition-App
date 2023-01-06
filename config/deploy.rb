@@ -45,6 +45,14 @@ set :rails_env, "production"
 set :bundle_gemfile, -> { release_path.join('server/Gemfile') }
 
 namespace :deploy do
+  after :updated, :build_web do
+    on roles(:app), in: :sequence, wait: 5 do
+      # within "#{release_path}/web" {} did not cwd for me
+      execute "cd #{release_path}/web && npm install"
+      execute "cd #{release_path}/web && npm run build"
+    end
+  end
+
   after :publishing, :restart_app do
     on roles(:app), in: :sequence, wait: 5 do
       execute "sudo service puma restart"
