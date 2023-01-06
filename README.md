@@ -91,8 +91,8 @@ know your way around Capistrano and CloudFormation you should find it easy to
 create the stack, configure your ssh credentials, and deploy the applications.
 
 As the Capistrano config deploys both the react front end and the rails api to
-the same server, it is store in the root of the project/repo. You will need to
-`bundle install` and  `cap development deploy` within project/repo root.
+the same server, it is stored in the root of the project/repo. You will need to
+`bundle install` and `cap development deploy` within project/repo root.
 
 
 ## Slack Integration Setup
