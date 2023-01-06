@@ -80,6 +80,21 @@ User/Employee receiving the rewards should be able to receive a slack notificati
 * bootsnap >= 1.1.0
 
 
+## Deployment
+
+For development/poc purposes, there is an example CloudFormation template to
+provision a server running nginx and postgresql and an associated Capistrano
+configuration to deploy the react front end and the rails api to the server.
+
+This is not intended for production use, and is not well-documented, but if you
+know your way around Capistrano and CloudFormation you should find it easy to
+create the stack, configure your ssh credentials, and deploy the applications.
+
+As the Capistrano config deploys both the react front end and the rails api to
+the same server, it is store in the root of the project/repo. You will need to
+`bundle install` and  `cap development deploy` within project/repo root.
+
+
 ## Slack Integration Setup
 
 Please refer to Slack API documentation for additional information: https://api.slack.com/
