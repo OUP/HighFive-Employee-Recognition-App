@@ -269,7 +269,7 @@
               "/etc/cron.daily/certbot-renew" : {
                 "content" : {"Fn::Join" : [ "", [
                   "#!/bin/bash\n",
-                  "/usr/bin/certbot renew --nginx --quiet\n"
+                  "/usr/bin/certbot renew --dns-route53 --quiet\n"
                 ] ]},
                 "mode" : "0755",
                 "owner" : "root",
