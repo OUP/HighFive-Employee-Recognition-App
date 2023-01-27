@@ -14,9 +14,9 @@ def open_asset(file_name)
   File.join('seed_assets', file_name)
 end
 
-# Only run on development (local) instances not on production, etc.
-unless Rails.env.development?
-  puts "Development seeds only (for now)!"
+# Only allow db:seed to run on "empty" database (i.e. no employees)
+if Employee.exists?
+  puts "Skipping db:seed as database not empty"
   exit 0
 end
 
