@@ -165,15 +165,19 @@
                 "command" : "/usr/bin/postgresql-setup initdb",
                 "test" : "! /usr/bin/postgresql-check-db-dir /var/lib/pgsql/data"
               },
-              "02-create-postgresql-database" : {
+              "02-start-postgresql-service" : {
+                "command" : "systemctl start postgresql",
+                "test" : "! systemctl status postgresql"
+              },
+              "03-create-postgresql-database" : {
                 "command" : "sudo -u postgres createdb website",
-                "test" : "test -z $(sudo -u postgres psql -Atc \"SELECT datname FROM pg_database WHERE datname = 'website'\")"
+                "test" : "test -z $(su - postgres -c \"psql -Atc \\\"SELECT datname FROM pg_database WHERE datname = 'website'\\\"\")"
               },
-              "03-create-postgresql-user" : {
+              "04-create-postgresql-user" : {
                 "command" : "sudo -u postgres createuser deploy",
-                "test" : "test -z $(sudo -u postgres psql -Atc \"SELECT rolname FROM pg_roles WHERE rolname = 'deploy'\")"
+                "test" : "test -z $(su - postgres -c \"psql -Atc \\\"SELECT rolname FROM pg_roles WHERE rolname = 'deploy'\\\"\")"
               },
-              "04-grant-postgresql-privileges" : {
+              "05-grant-postgresql-privileges" : {
                 "command" : "sudo -u postgres psql -c 'grant all privileges on database website to deploy;'"
               }
             },
