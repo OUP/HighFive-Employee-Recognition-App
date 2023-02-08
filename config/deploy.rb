@@ -59,3 +59,19 @@ namespace :deploy do
     end
   end
 end
+
+namespace :db do
+  desc 'Runs rake db:migrate'
+  task :migrate do
+    on roles(:db) do
+      execute "cd #{release_path}/server && RAILS_ENV=production bundle exec rake db:migrate"
+    end
+  end
+
+  desc 'Runs rake db:seed (here be dragons!)'
+  task :seed do
+    on roles(:db) do
+      execute "cd #{release_path}/server && RAILS_ENV=production bundle exec rake db:seed"
+    end
+  end
+end
