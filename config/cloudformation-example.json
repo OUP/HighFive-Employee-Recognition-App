@@ -282,7 +282,7 @@
               "/opt/website/shared/server/.env" : {
                 "content" : { "Fn::Join" : ["", [
                   "RAILS_SECRET_KEY=", { "Ref" : "railsSecretKey" }, "\n",
-                  "DATABASE_URL=postgres://deploy@localhost/website\n",
+                  "DATABASE_URL=postgres://deploy@%2Fvar%2Frun%2Fpostgresql/website\n",
                   ""
                 ]]}
               },
