@@ -59,3 +59,14 @@ namespace :deploy do
     end
   end
 end
+
+namespace :db do
+  desc 'Runs rake db:seed (here be dragons!)'
+  task :seed do
+    on roles(:db) do
+      within "/opt/website/current/server" do
+        execute 'RAILS_ENV=production bundle exec rake db:seed'
+      end
+    end
+  end
+end
